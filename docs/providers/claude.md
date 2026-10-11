@@ -130,7 +130,7 @@ Local spend does not require a Claude OAuth login. If Claude Code uses an API-ke
 
 - **"Not logged in"** — run `claude` and sign in to enable live subscription limits, then refresh. If you use an API-key gateway, local spend still appears whenever Claude Code has written session logs.
 - **"OpenUsage needs your OK…"** — right-click the Claude card, choose Refresh, and click **Always Allow**.
-- **"Claude Code login found"** — Claude Code's login is in your Keychain, but macOS hasn't let OpenUsage read it quietly yet. Refresh the card and choose **Always Allow**.
+- **"Claude Code login found"** — Claude Code's login is in your Keychain, but macOS hasn't let OpenUsage read it quietly yet. Refresh the card and choose **Always Allow**. The spend tiles keep working in the meantime.
 - **"Claude Code's saved sign-in expired"** — run `claude` once so Claude Code saves a new login, then refresh.
 - **"Claude Desktop login found"** — the Desktop login is there, but OpenUsage could not use it yet. Refresh the card and choose **Always Allow** if macOS asks for `Claude Safe Storage`.
 - **"Claude Desktop login is stale"** — open Claude Desktop so it can renew the login, then refresh OpenUsage.

@@ -27,7 +27,7 @@ extension WidgetDataStore {
         let family = ProviderAccountID.family(of: providerID)
         guard !keychainLedger.refusedItems(family: family).isEmpty else { return nil }
         switch providerErrorCategories[providerID] {
-        case .notLoggedIn, .credentialAccess, .authInvalid:
+        case .notLoggedIn, .credentialAccess, .authInvalid, .authExpired:
             break
         default:
             return nil
