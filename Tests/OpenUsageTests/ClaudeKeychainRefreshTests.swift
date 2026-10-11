@@ -77,12 +77,42 @@ final class ClaudeKeychainRefreshTests: XCTestCase {
         XCTAssertTrue(keychain.writes[0].contains("rotated-refresh"))
     }
 
-    func testRefusedKeychainLoginWithLocalHistoryAsksForAccess() async throws {
-        let now = Date(timeIntervalSince1970: 1_771_603_200)
-        let home = try ClaudeLogFixture.makeHome(files: [
-            "project/session.jsonl": ClaudeLogFixture.usageLine(timestamp: "2026-02-20T12:00:00Z", input: 100, output: 10)
-        ])
+    func testRefusedKeychainLoginKeepsLocalSpendAndAsksForAccess() async throws {
+        let first = ClaudeLogFixture.usageLine(timestamp: "2026-02-20T12:00:00Z", input: 100, output: 10)
+        let home = try ClaudeLogFixture.makeHome(files: ["project/session.jsonl": first])
         defer { try? FileManager.default.removeItem(at: home) }
+        let (provider, http) = makeRefusedProvider(home: home)
+
+        let before = await provider.refresh()
+        let second = ClaudeLogFixture.usageLine(
+            timestamp: "2026-02-20T13:00:00Z", input: 200, output: 20, messageID: "msg_2", requestID: "req_2"
+        )
+        try (first + "\n" + second).write(
+            to: home.appendingPathComponent("projects/project/session.jsonl"), atomically: true, encoding: .utf8
+        )
+        let after = await provider.refresh()
+
+        for snapshot in [before, after] {
+            XCTAssertNil(snapshot.errorCategory)
+            XCTAssertEqual(snapshot.warning, ClaudeAuthError.keychainPermissionRequired.localizedDescription)
+        }
+        XCTAssertGreaterThan(totalTokens(before), 0)
+        XCTAssertGreaterThan(totalTokens(after), totalTokens(before))
+        XCTAssertTrue(http.requests.isEmpty)
+    }
+
+    func testRefusedKeychainLoginWithoutLocalSpendAsksForAccess() async throws {
+        let home = try ClaudeLogFixture.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let (provider, _) = makeRefusedProvider(home: home)
+
+        let snapshot = await provider.refresh()
+
+        XCTAssertEqual(snapshot.errorCategory, .credentialAccess)
+    }
+
+    private func makeRefusedProvider(home: URL) -> (ClaudeProvider, RoutingHTTPClient) {
+        let now = Date(timeIntervalSince1970: 1_771_603_200)
         let http = RoutingHTTPClient { _ in
             XCTFail("no usage request without a readable login")
             return HTTPResponse(statusCode: 500, headers: [:], body: Data())
@@ -99,11 +129,11 @@ final class ClaudeKeychainRefreshTests: XCTestCase {
             now: { now },
             pricing: { TestPricing.bundled }
         )
+        return (provider, http)
+    }
 
-        let snapshot = await provider.refresh()
-
-        XCTAssertEqual(snapshot.errorCategory, .credentialAccess)
-        XCTAssertTrue(http.requests.isEmpty)
+    private func totalTokens(_ snapshot: ProviderSnapshot) -> Int {
+        snapshot.usageHistory?.series.daily.reduce(0) { $0 + $1.totalTokens } ?? 0
     }
 
     private func makeProvider(

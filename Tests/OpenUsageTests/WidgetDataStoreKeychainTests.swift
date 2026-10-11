@@ -128,7 +128,9 @@ final class WidgetDataStoreKeychainTests: XCTestCase {
             (ClaudeAuthError.keychainPermissionRequired, true),
             (ClaudeAuthError.desktopPermissionRequired, true),
             (ClaudeAuthError.invalidOAuthURL("nope"), true),
-            (ClaudeAuthError.tokenExpired, false),
+            (ClaudeAuthError.tokenExpired, true),
+            (ClaudeAuthError.desktopTokenExpired, true),
+            (ClaudeUsageError.connectionFailed, false),
         ]
         for (error, shows) in cases {
             let runtime = TestProviderRuntime(
