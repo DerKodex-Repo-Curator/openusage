@@ -16,7 +16,7 @@ final class WidgetDataStore {
     let providersByID: [String: ProviderRuntime]
     @ObservationIgnored let keychainAccessRequester: (any KeychainAccessRequesting)?
     @ObservationIgnored let keychainLedger: KeychainAccessLedger
-    @ObservationIgnored var keychainGrantInFlight: Set<String> = []
+    @ObservationIgnored var keychainGrants: [String: Task<Void, Never>] = [:]
     @ObservationIgnored var providerErrorCategories: [String: ErrorCategory] = [:]
     private let cache: ProviderSnapshotCache
     private let defaults: UserDefaults

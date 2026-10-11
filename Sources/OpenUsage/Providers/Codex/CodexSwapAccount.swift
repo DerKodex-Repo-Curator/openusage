@@ -37,8 +37,8 @@ struct CodexAccountIdentity: Equatable, Hashable, Sendable {
     }
 
     init?(storedKey key: String) {
-        guard Self.isComplete(key: key) else { return nil }
         let parts = key.split(separator: "|", omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return nil }
         self.init(accountID: String(parts[0]), email: String(parts[1]))
     }
 

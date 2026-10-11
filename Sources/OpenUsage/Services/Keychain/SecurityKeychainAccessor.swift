@@ -168,8 +168,8 @@ struct SecurityKeychainAccessor: KeychainAccessing {
             switch policy.writer {
             case .securityTool:
                 guard access.securityReadsSilently, access.lastWriterIsSecurityTool else {
-                    ledger.noteRefused(item)
-                    throw KeychainError.accessNeeded(service: service)
+                    AppLog.warn(.keychain, "not saving '\(service)': saving would prompt or lock out the app that owns it")
+                    throw KeychainError.writeFailed("OpenUsage can't save this sign-in without locking out the app that owns it.")
                 }
                 try addPassword(service: service, account: access.account, value: value, update: true)
             case .ownerApp:

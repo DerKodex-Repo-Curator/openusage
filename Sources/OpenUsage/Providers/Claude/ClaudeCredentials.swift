@@ -127,4 +127,5 @@ struct ClaudeCredentialGeneration: Equatable, Sendable {
 struct ClaudeCredentialLoad: Sendable {
     var candidates: [ClaudeCredentialState]
     var desktopStatus: ClaudeDesktopCredentialStatus
+    var keychainRefused: Bool
 }

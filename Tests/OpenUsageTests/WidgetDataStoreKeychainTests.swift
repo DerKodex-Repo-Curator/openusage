@@ -125,6 +125,7 @@ final class WidgetDataStoreKeychainTests: XCTestCase {
         let ledger = KeychainAccessLedger()
         let cases: [(Error, Bool)] = [
             (ClaudeAuthError.notLoggedIn, true),
+            (ClaudeAuthError.keychainPermissionRequired, true),
             (ClaudeAuthError.desktopPermissionRequired, true),
             (ClaudeAuthError.invalidOAuthURL("nope"), true),
             (ClaudeAuthError.tokenExpired, false),

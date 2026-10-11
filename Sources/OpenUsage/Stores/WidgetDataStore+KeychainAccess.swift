@@ -2,16 +2,25 @@ import Foundation
 
 extension WidgetDataStore {
     func refreshFromUser(providerID: String) async {
-        let family = ProviderAccountID.family(of: providerID)
+        await requestKeychainAccess(family: ProviderAccountID.family(of: providerID))
+        await refresh(providerID: providerID, force: true)
+    }
+
+    /// Refused items are tracked per family, so all of a family's account cards share one grant.
+    private func requestKeychainAccess(family: String) async {
+        if let running = keychainGrants[family] {
+            return await running.value
+        }
         let refused = keychainLedger.refusedItems(family: family)
-        if let requester = keychainAccessRequester, !refused.isEmpty {
-            guard keychainGrantInFlight.insert(providerID).inserted else { return }
-            defer { keychainGrantInFlight.remove(providerID) }
+        guard let requester = keychainAccessRequester, !refused.isEmpty else { return }
+        let grant = Task {
             for item in refused {
                 _ = await requester.request(item)
             }
         }
-        await refresh(providerID: providerID, force: true)
+        keychainGrants[family] = grant
+        await grant.value
+        keychainGrants[family] = nil
     }
 
     func keychainAccessNotice(for providerID: String) -> String? {

@@ -12,7 +12,7 @@ macOS asks only after you right-click a card and choose **Refresh**. It asks onc
 
 ## Why some sign-ins never ask
 
-Claude Code, GitHub CLI, Cursor's command-line token, and Antigravity store their items with the `security` tool. OpenUsage reads and updates those the same way, and only when that read is already silent. If it is not, the card tells you to Refresh and choose Always Allow. OpenUsage does not create a replacement item for another app's sign-in.
+Claude Code, GitHub CLI, Cursor's command-line token, and Antigravity store their items with the `security` tool. OpenUsage reads them the same way. If a read is not silent yet, the card tells you to Refresh and choose Always Allow. OpenUsage saves a renewed token only when the owning app can still read it without a prompt. OpenUsage does not create a replacement item for another app's sign-in.
 
 Claude Desktop's safe storage, Claude Swap's vault, and Codex's Keychain login are written by those apps themselves. OpenUsage reads them after you allow it.
 

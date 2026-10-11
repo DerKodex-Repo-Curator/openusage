@@ -170,6 +170,10 @@ final class ClaudeProvider: ProviderRuntime {
             case .notChecked, .notFound, .available:
                 break
             }
+            if credentialLoad.keychainRefused {
+                AppLog.info(LogTag.auth("claude"), "Claude Code login is in the Keychain but not readable without a prompt")
+                return ProviderSnapshot.error(provider: provider, error: ClaudeAuthError.keychainPermissionRequired)
+            }
             AppLog.info(LogTag.auth("claude"), "no access token, not logged in")
             let error = ClaudeAuthError.notLoggedIn
             let snapshot = await snapshotWithLocalUsage(
