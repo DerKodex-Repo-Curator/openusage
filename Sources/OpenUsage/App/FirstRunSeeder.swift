@@ -87,8 +87,12 @@ enum FirstRunSeeder {
             (provider.provider.id, Task { await provider.hasLocalCredentials() })
         }
         var detected = Set<String>()
-        for (id, probe) in probes where await probe.value {
-            detected.insert(id)
+        for (id, probe) in probes {
+            let hasCredentials = await probe.value
+            let keychainRefused = !KeychainAccessLedger.shared.refusedItems(family: ProviderAccountID.family(of: id)).isEmpty
+            if hasCredentials || keychainRefused {
+                detected.insert(id)
+            }
         }
         return detected
     }

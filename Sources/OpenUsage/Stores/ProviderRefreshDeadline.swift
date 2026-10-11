@@ -16,13 +16,10 @@ enum ProviderRefreshDeadline {
     /// The refreshed snapshot, or `nil` if `timeout` elapsed first.
     static func snapshot(
         from provider: ProviderRuntime,
-        force: Bool,
         timeout: TimeInterval
     ) async -> ProviderSnapshot? {
         let work = Task { @MainActor in
-            await ProviderRefreshContext.$isManual.withValue(force) {
-                await provider.refresh()
-            }
+            await provider.refresh()
         }
         let claim = ContinuationClaim()
         return await withTaskCancellationHandler {

@@ -9,6 +9,7 @@ enum ClaudeAuthError: Error, LocalizedError, Equatable {
     case desktopCredentialsUnavailable
     case sessionExpired
     case tokenExpired
+    case keychainTokenExpired
     case credentialsChanged
     case invalidOAuthURL(String)
 
@@ -28,6 +29,8 @@ enum ClaudeAuthError: Error, LocalizedError, Equatable {
             return "Session expired. Run `claude` to log in again."
         case .tokenExpired:
             return "Token expired. Run `claude` to log in again."
+        case .keychainTokenExpired:
+            return "Claude Code's saved sign-in expired. Run `claude` once, then refresh."
         case .credentialsChanged:
             return "Claude login changed during refresh. Refresh again."
         case .invalidOAuthURL(let value):
@@ -43,7 +46,7 @@ enum ClaudeAuthError: Error, LocalizedError, Equatable {
     /// `CodexAuthError.allowsAuthFallback`.
     var allowsAuthFallback: Bool {
         switch self {
-        case .sessionExpired, .tokenExpired, .desktopTokenExpired, .swapTokenExpired:
+        case .sessionExpired, .tokenExpired, .keychainTokenExpired, .desktopTokenExpired, .swapTokenExpired:
             return true
         case .notLoggedIn, .desktopPermissionRequired, .desktopCredentialsUnavailable,
              .credentialsChanged, .invalidOAuthURL:
@@ -61,7 +64,7 @@ struct ClaudeOAuthConfig: Hashable, Sendable {
 struct ClaudeAuthStore: Sendable {
     private static let defaultClaudeHome = "~/.claude"
     private static let credentialFileName = ".credentials.json"
-    private static let keychainServicePrefix = "Claude Code"
+    static let keychainServicePrefix = "Claude Code"
     private static let prodBaseAPIURL = "https://api.anthropic.com"
     private static let prodRefreshURL = "https://platform.claude.com/v1/oauth/token"
     private static let prodClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
@@ -107,10 +110,7 @@ struct ClaudeAuthStore: Sendable {
     /// (`ClaudeAuthError.allowsAuthFallback`) — falls through to the next, so an external `claude`
     /// re-login is picked up no matter which source it lands in, even when a stale/locked-out token still
     /// sits in another. Re-read on every refresh; nothing is cached in memory.
-    func loadCredentialSet(
-        allowDesktopInteraction: Bool = false,
-        forceDesktopFallback: Bool = false
-    ) -> ClaudeCredentialLoad {
+    func loadCredentialSet(forceDesktopFallback: Bool = false) -> ClaudeCredentialLoad {
         var stored: [ClaudeCredentialState]
         if let swapAccount {
             var candidates: [ClaudeCredentialState] = []
@@ -143,7 +143,6 @@ struct ClaudeAuthStore: Sendable {
         if swapAccount != nil || forceDesktopFallback || !hasUsableCLILogin || preferOrganizationScopedDesktop {
             let expectedUser = expectedIdentityKey?.split(separator: "|").first.map(String.init)
             let result = desktop.load(
-                allowInteraction: allowDesktopInteraction,
                 organization: desktopOrganization,
                 expectedAccountUUID: expectedUser
             )
@@ -207,6 +206,22 @@ struct ClaudeAuthStore: Sendable {
     func needsRefresh(_ oauth: ClaudeOAuth) -> Bool {
         guard let expiresAt = oauth.expiresAt else { return false }
         return expiresAt - now().timeIntervalSince1970 * 1000 <= 5 * 60 * 1000
+    }
+
+    func accessTokenHasExpired(_ oauth: ClaudeOAuth) -> Bool {
+        guard let expiresAt = oauth.expiresAt else { return false }
+        return expiresAt <= now().timeIntervalSince1970 * 1000
+    }
+
+    func isUnwritableKeychain(_ source: ClaudeCredentialState.Source) -> Bool {
+        switch source {
+        case .keychainCurrentUser(let service):
+            return !keychain.canWriteWithSecurityToolForCurrentUser(service: service)
+        case .keychainLegacy(let service):
+            return !keychain.canWriteWithSecurityTool(service: service)
+        case .file, .accountFile, .desktop, .swapVault, .environment:
+            return false
+        }
     }
 
     func credentialGeneration(forceDesktopFallback: Bool = false) -> ClaudeCredentialGeneration {

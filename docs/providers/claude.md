@@ -57,14 +57,14 @@ Both older Desktop login caches and newer account-specific caches are supported.
 tokens must match the account currently signed in to Desktop and the card's organization. A newer
 cache entry or deletion marker takes precedence over an older copy of the same login.
 
-macOS asks once before OpenUsage can access that Keychain item. Background refreshes never open the
-password dialog: OpenUsage first asks you to refresh manually, and choosing **Always Allow** makes later
-refreshes silent. If Desktop's short-lived token expires, open Claude Desktop so it can renew the login,
-then refresh OpenUsage.
+A background refresh never opens a Keychain dialog. If macOS has not let OpenUsage read Claude Desktop's
+`Claude Safe Storage` item, the card tells you to right-click it, choose Refresh, and click **Always Allow**.
+That grant sticks. **Deny** leaves the card alone until you choose Refresh again. If Desktop's short-lived
+token expires, open Claude Desktop so it can renew the login, then refresh OpenUsage.
 
 A `CLAUDE_CODE_OAUTH_TOKEN` — usually a long-lived `claude setup-token` — can run the model but can't read your Session and Weekly limits, and it often lingers in your shell environment. So when a real keychain or file login is present, OpenUsage uses that login for the live meters and keeps the environment token only as a fallback; the Session/Weekly meters no longer go blank just because that token is set. If the environment token is your *only* credential (a headless setup), it's used on its own and the spend tiles still load from local logs.
 
-If one source holds an expired or "locked out" token, OpenUsage falls back to the others — so signing in again with `claude` outside the app is picked up on the next refresh, without restarting OpenUsage. Claude Code tokens are refreshed automatically; rotated tokens are written back only while the ordered login candidates still match the start of the refresh, so a newly added higher-priority login wins. Claude Desktop tokens are never refreshed or written by OpenUsage.
+If one source holds an expired or "locked out" token, OpenUsage falls back to the others — so signing in again with `claude` outside the app is picked up on the next refresh, without restarting OpenUsage. Claude Code tokens are refreshed only when OpenUsage can save the new token back through the same `security` path Claude Code uses. If it cannot, it keeps using the current token until that token has actually expired, then asks you to run `claude` once. Rotated tokens are written back only while the ordered login candidates still match the start of the refresh, so a newly added higher-priority login wins. Claude Desktop tokens are never refreshed or written by OpenUsage.
 
 Saving a refreshed Claude Code token updates only its access token, refresh token, and expiry in the
 latest credential document. MCP logins and other Claude Code fields are preserved, including changes
@@ -129,7 +129,9 @@ Local spend does not require a Claude OAuth login. If Claude Code uses an API-ke
 ## Troubleshooting
 
 - **"Not logged in"** — run `claude` and sign in to enable live subscription limits, then refresh. If you use an API-key gateway, local spend still appears whenever Claude Code has written session logs.
-- **"Claude Desktop login found"** — refresh manually and choose **Always Allow** when macOS asks for access to `Claude Safe Storage`.
+- **"OpenUsage needs your OK…"** — right-click the Claude card, choose Refresh, and click **Always Allow**.
+- **"Claude Code's saved sign-in expired"** — run `claude` once so Claude Code saves a new login, then refresh.
+- **"Claude Desktop login found"** — the Desktop login is there, but OpenUsage could not use it yet. Refresh the card and choose **Always Allow** if macOS asks for `Claude Safe Storage`.
 - **"Claude Desktop login is stale"** — open Claude Desktop so it can renew the login, then refresh OpenUsage.
 - **"Re-login for live usage"** (an amber warning on the Claude header) — your saved login can authenticate for inference but can't read your subscription limits, because it lacks the `user:profile` access (this is what an inference-only token from `claude setup-token` carries). Run `claude` and sign in again with your Claude account, then refresh; the spend tiles keep working in the meantime.
 - **"Updates blocked by Anthropic"** (an amber warning on the Claude header) — the usage API is throttling OpenUsage. It keeps the last values from the same login — including, right after a relaunch, the limits cached for the same verified account (windows that have already reset are dropped) — shows when it will retry, and backs off in the meantime. A different login starts with a fresh cache and cooldown.

@@ -36,6 +36,12 @@ struct CodexAccountIdentity: Equatable, Hashable, Sendable {
         self.init(accountID: storedID ?? claimID, email: email)
     }
 
+    init?(storedKey key: String) {
+        guard Self.isComplete(key: key) else { return nil }
+        let parts = key.split(separator: "|", omittingEmptySubsequences: false)
+        self.init(accountID: String(parts[0]), email: String(parts[1]))
+    }
+
     private static func validComponent(_ value: String) -> Bool {
         value.rangeOfCharacter(from: .whitespacesAndNewlines.union(.controlCharacters)
             .union(CharacterSet(charactersIn: "/\\|"))) == nil

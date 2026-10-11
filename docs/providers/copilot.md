@@ -32,7 +32,7 @@ Checked in this order (prompt-free files first, Keychain last):
 
 1. Copilot editor token: `~/.config/github-copilot/apps.json` (older `hosts.json`) — written by the VS Code / JetBrains / Neovim Copilot plugins.
 2. GitHub CLI config: `~/.config/gh/hosts.yml` (`oauth_token`), when `gh` stores its token in a file.
-3. GitHub CLI Keychain item (service `gh:github.com`), when `gh` stores its token in the system keyring.
+3. GitHub CLI Keychain item (service `gh:github.com`), when `gh` stores its token in the system keyring. OpenUsage reads it the same way `gh` does. A background refresh never opens a Keychain dialog; if the item cannot be read, right-click the card, choose Refresh, and click **Always Allow**.
 
 ### Setup
 

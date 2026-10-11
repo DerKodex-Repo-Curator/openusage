@@ -2,7 +2,7 @@
 
 **Sync Across Macs** is off by default. When it is on, each Mac writes one versioned OpenUsage history
 file to the app's private iCloud container and reads the files written by other Macs signed into the same
-iCloud account. A random device ID is kept in the login Keychain so the same Mac continues updating its
+iCloud account. A random device ID is kept in OpenUsage's own login Keychain item so the same Mac continues updating its
 existing file after app preferences are reset or the app is reinstalled. There is no folder picker,
 pairing code, or separate account.
 

@@ -2,6 +2,7 @@ import Foundation
 
 /// Metadata only. Discover saved slots without running shell aliases or reading any secrets.
 struct ClaudeSwapAccount: Equatable, Sendable {
+    static let keychainService = "claude-swap"
     let root: String
     let slot: String
     let email: String
@@ -84,7 +85,7 @@ extension ClaudeAuthStore {
         }
         do {
             guard let text = try keychain.readGenericPassword(
-                service: "claude-swap", account: "account-\(account.slot)-\(account.email)"
+                service: ClaudeSwapAccount.keychainService, account: "account-\(account.slot)-\(account.email)"
             ) else { return nil }
             guard let state = candidate(text) else {
                 AppLog.warn(LogTag.auth("claude"), "Claude Swap Keychain backup has no usable OAuth credential")

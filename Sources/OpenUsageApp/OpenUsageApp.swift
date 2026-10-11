@@ -1,7 +1,18 @@
+import Darwin
 import OpenUsage
 import SwiftUI
 
 @main
+enum OpenUsageMain {
+    static func main() {
+        if let code = KeychainGrantCommand.exitCode(for: CommandLine.arguments) {
+            exit(code)
+        }
+        KeychainUserInteraction.disableForProcess()
+        OpenUsageApp.main()
+    }
+}
+
 struct OpenUsageApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 

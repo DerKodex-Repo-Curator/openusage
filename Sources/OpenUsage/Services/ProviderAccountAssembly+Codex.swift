@@ -59,6 +59,9 @@ extension ProviderAccountAssembly {
             guard let state = auth.loadKeychainAuth(), state.hasUsableAccessToken else { return nil }
             return CodexAccountIdentity(auth: state.auth)
         }
+        let keychainReadRefused = KeychainAccessLedger.shared.refusedItems(family: "codex").contains {
+            $0.service == CodexAuthStore.keychainService
+        }
         let configuredHomes = Set(CodexHomeScanner.configuredHomes(
             environment: observer.environment, homeDirectory: homeDirectory
         ))
@@ -131,6 +134,22 @@ extension ProviderAccountAssembly {
             observe(login.identity, label: label(for: login.identity, preferred: login.label ?? login.identity.email),
                     named: login.label != nil,
                     source: .init(kind: .pi, anchor: login.providerID, holdsDefaultSource: false))
+        }
+        if keychainIdentity == nil, keychainReadRefused {
+            for record in accountsStore.records where record.family == "codex" && !record.removedTombstone {
+                guard record.sources.contains(where: { $0.kind == .defaultHome && $0.anchor == nil }) else { continue }
+                guard let identity = CodexAccountIdentity(storedKey: record.identityKey) else {
+                    AppLog.warn(.config, "Codex Auth read was refused; a saved account card could not be rebuilt")
+                    continue
+                }
+                guard !identities.contains(where: { $0.key == identity.key }) else { continue }
+                let holdsDefault = !assignedDefault && record.sources.contains {
+                    $0.kind == .defaultHome && $0.anchor == nil && $0.holdsDefaultSource
+                }
+                if holdsDefault { assignedDefault = true }
+                observe(identity, label: label(for: identity),
+                        source: .init(kind: .defaultHome, anchor: nil, holdsDefaultSource: holdsDefault))
+            }
         }
 
         let records = accountsStore.reconcile(with: observations)

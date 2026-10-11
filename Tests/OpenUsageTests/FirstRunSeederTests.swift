@@ -144,6 +144,20 @@ final class FirstRunSeederTests: XCTestCase {
 
     // MARK: - Concurrent detection
 
+    func testKeychainRefusalDuringTheProbeCountsAsALocalLogin() async {
+        let item = KeychainItemRef(service: CursorAuthStore.keychainAccessTokenService, account: "acct")
+        defer { KeychainAccessLedger.shared.noteReadable(item) }
+        let cursor = CredentialStubProvider(id: "cursor") {
+            await Task.yield()
+            KeychainAccessLedger.shared.noteRefused(item)
+            return false
+        }
+
+        let detected = await FirstRunSeeder.detectLocalProviders([cursor, stub("grok", hasCredentials: false)])
+
+        XCTAssertEqual(detected, ["cursor"])
+    }
+
     func testDetectLocalProvidersProbesConcurrently() async {
         // A single probe can block on a `security`/`sqlite3` subprocess for seconds, so probing
         // sequentially made first-launch detection take the sum of all providers' waits. Each gated
@@ -202,6 +216,11 @@ private final class CredentialStubProvider: ProviderRuntime {
     init(id: String, gate: ProbeGate) {
         self.provider = Provider(id: id, displayName: id.capitalized, icon: .providerMark(id))
         self.hasCredentials = { await gate.arrive() }
+    }
+
+    init(id: String, probe: @escaping @MainActor () async -> Bool) {
+        self.provider = Provider(id: id, displayName: id.capitalized, icon: .providerMark(id))
+        self.hasCredentials = probe
     }
 
     func refresh() async -> ProviderSnapshot {

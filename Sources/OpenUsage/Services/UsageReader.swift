@@ -112,7 +112,8 @@ public struct UsageReader {
                 isProviderEnabled: includesProvider,
                 // The CLI shares the app's snapshot cache, so its writes must carry the same account
                 // stamp — an unstamped claude/codex entry would be discarded at the app's next launch.
-                providerIdentityKeys: accountAssembly.identityKeysByCard
+                providerIdentityKeys: accountAssembly.identityKeysByCard,
+                keychainAccessRequester: nil
             )
             if let matchedIDs {
                 for providerID in orderedIDs.filter(matchedIDs.contains) {

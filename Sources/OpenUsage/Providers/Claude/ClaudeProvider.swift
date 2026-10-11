@@ -123,12 +123,8 @@ final class ClaudeProvider: ProviderRuntime {
         forceDesktopFallback: Bool,
         previousFallbackError: ClaudeAuthError?
     ) async -> ProviderSnapshot {
-        let allowDesktopInteraction = ProviderRefreshContext.isManual
         let credentialLoad = await loadOffMainActor { [authStore] in
-            authStore.loadCredentialSet(
-                allowDesktopInteraction: allowDesktopInteraction,
-                forceDesktopFallback: forceDesktopFallback
-            )
+            authStore.loadCredentialSet(forceDesktopFallback: forceDesktopFallback)
         }
         let storedCandidates = credentialLoad.candidates
         let candidates = storedCandidates.filter {
@@ -362,12 +358,13 @@ final class ClaudeProvider: ProviderRuntime {
 
         if authStore.needsRefresh(state.oauth),
            let refreshToken = state.oauth.refreshToken,
-           !refreshToken.isEmpty {
-            let refreshed = try await refreshAccessToken(
+           !refreshToken.isEmpty,
+           let refreshed = try await refreshStoredToken(
                 state: &state,
                 refreshToken: refreshToken,
-                expectedGeneration: expectedGeneration
-            )
+                expectedGeneration: expectedGeneration,
+                rejectedByServer: false
+           ) {
             state.oauth.accessToken = refreshed.accessToken
             if refreshed.persisted { expectedGeneration = expectedGeneration.replacing(state) }
         }
@@ -396,11 +393,14 @@ final class ClaudeProvider: ProviderRuntime {
                 guard let refreshToken = working.oauth.refreshToken, !refreshToken.isEmpty else {
                     throw ClaudeAuthError.tokenExpired
                 }
-                let refreshed = try await self.refreshAccessToken(
+                guard let refreshed = try await self.refreshStoredToken(
                     state: &working,
                     refreshToken: refreshToken,
-                    expectedGeneration: expectedGeneration
-                )
+                    expectedGeneration: expectedGeneration,
+                    rejectedByServer: true
+                ) else {
+                    throw ClaudeAuthError.keychainTokenExpired
+                }
                 if refreshed.persisted {
                     expectedGeneration = expectedGeneration.replacing(working)
                 }
@@ -591,6 +591,31 @@ final class ClaudeProvider: ProviderRuntime {
     private struct RefreshedAccess {
         var accessToken: String
         var persisted: Bool
+    }
+
+    /// Refreshing a Claude Code Keychain token OpenUsage cannot write back would rotate Claude Code's
+    /// login with nowhere to put the new refresh token.
+    private func refreshStoredToken(
+        state: inout ClaudeCredentialState,
+        refreshToken: String,
+        expectedGeneration: ClaudeCredentialGeneration,
+        rejectedByServer: Bool
+    ) async throws -> RefreshedAccess? {
+        if authStore.isUnwritableKeychain(state.source) {
+            if rejectedByServer || authStore.accessTokenHasExpired(state.oauth) {
+                throw ClaudeAuthError.keychainTokenExpired
+            }
+            AppLog.info(
+                LogTag.auth("claude"),
+                "skipping token refresh; OpenUsage cannot save the rotated Claude Code sign-in"
+            )
+            return nil
+        }
+        return try await refreshAccessToken(
+            state: &state,
+            refreshToken: refreshToken,
+            expectedGeneration: expectedGeneration
+        )
     }
 
     private func refreshAccessToken(

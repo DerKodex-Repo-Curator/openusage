@@ -27,7 +27,7 @@ into the Grok CLI is not required.
 
 ## Where credentials come from
 
-Just be signed into the Cursor app. OpenUsage reads Cursor's local state database (and its keychain entries) for the session tokens; refreshed tokens are persisted back. Nothing extra to install or configure.
+Just be signed into the Cursor app. OpenUsage reads Cursor's local state database and its Keychain tokens. A refreshed token is written back only through the same `security` path Cursor's tools use, and only when that write stays silent for those tools. A background refresh never opens a Keychain dialog. If a token cannot be read, right-click the card, choose Refresh, and click **Always Allow**.
 
 ## Spend history
 

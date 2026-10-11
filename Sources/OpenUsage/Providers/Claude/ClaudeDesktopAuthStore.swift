@@ -1,7 +1,6 @@
 import CommonCrypto
 import CryptoKit
 import Foundation
-import LocalAuthentication
 import Security
 
 enum ClaudeDesktopCredentialStatus: Sendable, Equatable {
@@ -20,44 +19,30 @@ struct ClaudeDesktopCredentialResult: Sendable {
 }
 
 protocol ClaudeDesktopSafeStorageKeyReading: Sendable {
-    func readPassword(allowInteraction: Bool) throws -> String?
+    func readPassword() throws -> String?
 }
 
 struct ClaudeDesktopSafeStorageKeyReader: ClaudeDesktopSafeStorageKeyReading {
-    private static let service = "Claude Safe Storage"
-    private static let account = "Claude Key"
+    static let service = "Claude Safe Storage"
+    static let account = "Claude Key"
 
-    func readPassword(allowInteraction: Bool) throws -> String? {
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: Self.account,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnData as String: true
-        ]
-        if !allowInteraction {
-            let context = LAContext()
-            context.interactionNotAllowed = true
-            query[kSecUseAuthenticationContext as String] = context
-        }
+    var keychain: any KeychainAccessing = SecurityKeychainAccessor()
 
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        switch status {
-        case errSecSuccess:
-            guard let data = result as? Data,
-                  let password = String(data: data, encoding: .utf8),
+    func readPassword() throws -> String? {
+        do {
+            guard let password = try keychain.readGenericPassword(service: Self.service, account: Self.account),
                   !password.isEmpty
-            else {
-                throw ClaudeDesktopCredentialError.invalidSafeStorageKey
-            }
+            else { return nil }
             return password
-        case errSecItemNotFound:
-            return nil
-        case errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled:
-            throw ClaudeDesktopCredentialError.permissionRequired
-        default:
-            throw ClaudeDesktopCredentialError.keychainFailure(Int(status))
+        } catch let error as KeychainError {
+            switch error {
+            case .accessNeeded:
+                throw ClaudeDesktopCredentialError.permissionRequired
+            case .locked:
+                throw ClaudeDesktopCredentialError.keychainFailure(Int(errSecInteractionNotAllowed))
+            case .readFailed, .writeFailed:
+                throw ClaudeDesktopCredentialError.keychainFailure(Int(errSecAuthFailed))
+            }
         }
     }
 }
@@ -137,7 +122,6 @@ struct ClaudeDesktopAuthStore: Sendable {
     }
 
     func load(
-        allowInteraction: Bool,
         organization: String? = nil,
         expectedAccountUUID: String? = nil
     ) -> ClaudeDesktopCredentialResult {
@@ -152,7 +136,7 @@ struct ClaudeDesktopAuthStore: Sendable {
         }
 
         do {
-            guard let key = try safeStorageKey(allowInteraction: allowInteraction) else {
+            guard let key = try safeStorageKey() else {
                 return ClaudeDesktopCredentialResult(oauth: nil, status: .notFound)
             }
             guard let activeOrg = try loadActiveOrganization(key: key),
@@ -189,9 +173,9 @@ struct ClaudeDesktopAuthStore: Sendable {
         }
     }
 
-    private func safeStorageKey(allowInteraction: Bool) throws -> Data? {
+    private func safeStorageKey() throws -> Data? {
         if let cached = keyCache.value { return cached }
-        guard let password = try keyReader.readPassword(allowInteraction: allowInteraction) else {
+        guard let password = try keyReader.readPassword() else {
             return nil
         }
         let key = try Self.deriveKey(password: password)

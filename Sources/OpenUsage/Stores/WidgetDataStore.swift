@@ -13,7 +13,11 @@ struct StalenessHint: Equatable {
 @Observable
 final class WidgetDataStore {
     private let registry: WidgetRegistry
-    private let providersByID: [String: ProviderRuntime]
+    let providersByID: [String: ProviderRuntime]
+    @ObservationIgnored let keychainAccessRequester: (any KeychainAccessRequesting)?
+    @ObservationIgnored let keychainLedger: KeychainAccessLedger
+    @ObservationIgnored var keychainGrantInFlight: Set<String> = []
+    @ObservationIgnored var providerErrorCategories: [String: ErrorCategory] = [:]
     private let cache: ProviderSnapshotCache
     private let defaults: UserDefaults
     /// Whether a provider is currently enabled. Injected so the store consults the single
@@ -143,7 +147,9 @@ final class WidgetDataStore {
         providerRefreshTimeout: TimeInterval = WidgetDataStore.defaultProviderRefreshTimeout,
         notificationSettings: (@MainActor () -> NotificationSettingsStore)? = nil,
         postNotification: (@MainActor (String, String, String, String) async -> Bool)? = nil,
-        providerIdentityKeys: [String: String] = [:]
+        providerIdentityKeys: [String: String] = [:],
+        keychainAccessRequester: (any KeychainAccessRequesting)? = nil,
+        keychainLedger: KeychainAccessLedger = .shared
     ) {
         precondition(slowProviderRefreshThreshold >= 0)
         precondition(providerRefreshTimeout > 0)
@@ -163,6 +169,8 @@ final class WidgetDataStore {
                 await AppNotifications.shared.post(idPrefix: idPrefix, title: title, subtitle: subtitle, body: body)
             }
         self.providerIdentityKeys = providerIdentityKeys
+        self.keychainAccessRequester = keychainAccessRequester
+        self.keychainLedger = keychainLedger
         self.meterStyle = defaults.enumValue(forKey: Self.meterStyleKey, default: .remaining)
         self.resetDisplayMode = defaults.enumValue(forKey: Self.resetDisplayModeKey, default: .relative)
         self.alwaysShowPacing = defaults.bool(forKey: Self.alwaysShowPacingKey)
@@ -321,10 +329,10 @@ final class WidgetDataStore {
         // forever. Past the deadline, stop waiting and treat it as any other failed refresh.
         guard var snapshot = await ProviderRefreshDeadline.snapshot(
             from: provider,
-            force: force,
             timeout: providerRefreshTimeout
         ) else {
             providerErrors[providerID] = "Refresh timed out after \(Int(providerRefreshTimeout))s"
+            providerErrorCategories[providerID] = .network
             failureRetryAfter[providerID] = now().addingTimeInterval(Self.failureRetryBackoff)
             AppLog.warn(.refresh, "\(providerID) timed out after \(Int(providerRefreshTimeout))s")
             onRefreshOutcome?(providerID, .failed, .network, force)
@@ -347,6 +355,7 @@ final class WidgetDataStore {
             // Failed refresh: surface the error but keep the last good snapshot on screen rather than
             // collapsing every row to "No data". The provider error string is already user-safe.
             providerErrors[providerID] = message
+            providerErrorCategories[providerID] = snapshot.errorCategory
             // Negative-cache the failure so a wake burst can't re-probe this provider in a tight loop.
             failureRetryAfter[providerID] = now().addingTimeInterval(Self.failureRetryBackoff)
             AppLog.warn(.refresh, "\(providerID) failed: \(message)")
@@ -356,6 +365,7 @@ final class WidgetDataStore {
         if providerErrors[providerID] != nil {
             providerErrors[providerID] = nil
         }
+        providerErrorCategories[providerID] = nil
         // Recovered: drop any backoff so the provider resumes the normal cadence immediately.
         failureRetryAfter[providerID] = nil
         // A provider can refresh its live limits successfully while its optional local log/CSV scan
@@ -534,7 +544,7 @@ final class WidgetDataStore {
     /// current failure — the error must win, or a stale "Re-login for live usage" warning would hide a
     /// real "Token expired" failure. When there's no error, the soft warning (if any) shows.
     func headerNotice(for providerID: String) -> String? {
-        errorMessage(for: providerID) ?? warningMessage(for: providerID)
+        keychainAccessNotice(for: providerID) ?? errorMessage(for: providerID) ?? warningMessage(for: providerID)
     }
 
     /// A snapshot that carries only error lines is a failed refresh; its message comes from the badge.

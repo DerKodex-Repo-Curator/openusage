@@ -72,8 +72,9 @@ short trail in the log file:
 - **Nothing updates.** Refresh runs on a timer and respects the cache; see
   [Refreshing & caching](refreshing.md) for when a network call actually happens. Use the per-provider
   "Refresh" in the row's context menu to force one.
-- **Permissions / keychain prompts on every rebuild.** The script signs with a stable Apple Development
-  identity so the permission ACLs stick. If you see repeated prompts, make sure such an identity exists in
-  your keychain (the script warns when it falls back to ad-hoc signing).
+- **A Keychain dialog.** Background refresh does not show one. A dialog means you chose Refresh on a card.
+  Click **Always Allow** so the grant sticks. The dev script signs with a stable Apple Development identity
+  so that grant survives rebuilds. If prompts return on every rebuild, make sure that identity exists (the
+  script warns when it falls back to ad-hoc signing).
 - **Inspect the local API.** With the app running, `curl 127.0.0.1:6736/v1/usage` shows the same usage
   snapshots the UI uses — handy to confirm whether a problem is in fetching/mapping or in the UI.

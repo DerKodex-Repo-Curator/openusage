@@ -26,7 +26,7 @@ While a pool's rolling 5-hour window has no usage yet, that meter reads **Not st
 OpenUsage never asks for a token — it reads what Antigravity already has:
 
 - **Antigravity running** — OpenUsage talks to the app's local language server (the richest source, and where the plan name comes from).
-- **App closed** — it falls back to the OAuth token Antigravity / `agy` store in your macOS Keychain and queries Google's Cloud Code API. An expired token is refreshed automatically (OpenUsage never writes back to Antigravity's own keychain item). Its short-lived cache is reused only while the same Keychain login is present and readable.
+- **App closed** — it falls back to the OAuth token Antigravity / `agy` store in your macOS Keychain and queries Google's Cloud Code API. An expired access token is refreshed into OpenUsage's own cache (OpenUsage never writes Antigravity's Keychain item). That cache is reused only while the same Keychain login is present and readable. A background refresh never opens a Keychain dialog; if the item cannot be read, right-click the card, choose Refresh, and click **Always Allow**.
 
 If neither is available you'll see *Start Antigravity or run `agy` and try again.*
 

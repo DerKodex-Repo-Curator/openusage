@@ -1,251 +1,281 @@
-import Dispatch
-import Security
 import XCTest
 @testable import OpenUsage
 
 final class KeychainAccessorTests: XCTestCase {
-    func testItemNotFoundReturnsNil() throws {
-        let accessor = SecurityKeychainAccessor(
-            itemAccessor: StubItemAccessor(readStatus: errSecItemNotFound)
-        )
-        XCTAssertNil(try accessor.readGenericPassword(service: "Test"))
-    }
+    private let cursor = CursorAuthStore.keychainAccessTokenService
+    private let own = "com.robinebers.openusage.icloud-sync-device-id.v1"
 
-    func testNonItemNotFoundFailureThrowsReadFailed() {
-        let accessor = SecurityKeychainAccessor(
-            itemAccessor: StubItemAccessor(readStatus: errSecInteractionNotAllowed)
-        )
-        XCTAssertThrowsError(try accessor.readGenericPassword(service: "Test")) { error in
-            guard case KeychainError.readFailed = error else {
-                return XCTFail("expected KeychainError.readFailed, got \(error)")
-            }
-        }
-    }
+    func testSecurityReadUsesExactArgumentsAndStripsOneNewline() throws {
+        let inspector = FakeInspector(inspection: .found(access(account: "rebers", silent: true, securityWrote: true)))
+        let runner = RecordingProcess(result: ProcessResult(exitCode: 0, stdout: "secret\n", stderr: ""))
+        let ledger = KeychainAccessLedger()
+        let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: ledger)
 
-    func testFoundValueIsReturnedTrimmed() throws {
-        let accessor = SecurityKeychainAccessor(
-            itemAccessor: StubItemAccessor(data: Data("secret-token\n".utf8))
-        )
-        XCTAssertEqual(try accessor.readGenericPassword(service: "Test"), "secret-token")
-    }
-
-    func testExplicitAccountReadAndWriteUseTheSameItem() throws {
-        let itemAccessor = StubItemAccessor()
-        let accessor: any KeychainAccessing = SecurityKeychainAccessor(itemAccessor: itemAccessor)
-        let account = "cli|0123456789abcdef"
-
-        _ = try accessor.readGenericPassword(service: "Codex Auth", account: account)
-        try accessor.writeGenericPassword(service: "Codex Auth", account: account, value: "synthetic-token")
-
-        XCTAssertEqual(itemAccessor.requests, [
-            .init(operation: .read, service: "Codex Auth", account: account),
-            .init(operation: .update, service: "Codex Auth", account: account),
+        XCTAssertEqual(try accessor.readGenericPassword(service: cursor), "secret")
+        XCTAssertEqual(runner.calls, [
+            .init(executable: "/usr/bin/security", arguments: ["find-generic-password", "-s", cursor, "-a", "rebers", "-w"], timeout: 10)
         ])
+        XCTAssertTrue(ledger.refusedItems(family: "cursor").isEmpty)
     }
 
-    func testExplicitAccountWriteFailurePropagates() {
-        let accessor = SecurityKeychainAccessor(
-            itemAccessor: StubItemAccessor(updateStatus: errSecInteractionNotAllowed)
+    func testRefusedPreflightSpawnsNothingAndFillsTheLedger() {
+        let inspector = FakeInspector(inspection: .found(access(account: "rebers", silent: false, securityWrote: true)))
+        let runner = RecordingProcess()
+        let ledger = KeychainAccessLedger()
+        let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: ledger)
+
+        XCTAssertThrowsError(try accessor.readGenericPassword(service: cursor)) { error in
+            XCTAssertEqual(error as? KeychainError, .accessNeeded(service: cursor))
+        }
+        XCTAssertTrue(runner.calls.isEmpty)
+        XCTAssertEqual(ledger.refusedItems(family: "cursor"), [KeychainItemRef(service: cursor, account: "rebers")])
+    }
+
+    func testLockedReadSpawnsNothing() {
+        let inspector = FakeInspector(inspection: .locked)
+        let runner = RecordingProcess()
+        let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: KeychainAccessLedger())
+
+        XCTAssertThrowsError(try accessor.readGenericPassword(service: cursor)) { error in
+            XCTAssertEqual(error as? KeychainError, .locked)
+        }
+        XCTAssertTrue(runner.calls.isEmpty)
+        XCTAssertEqual(inspector.inspectCount, 1)
+    }
+
+    func testSecurityExit44ReturnsNil() throws {
+        let inspector = FakeInspector(inspection: .found(access(account: "rebers", silent: true, securityWrote: true)))
+        let runner = RecordingProcess(result: ProcessResult(exitCode: 44, stdout: "", stderr: ""))
+        let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: KeychainAccessLedger())
+
+        XCTAssertNil(try accessor.readGenericPassword(service: cursor))
+    }
+
+    func testOwnerReadNeverSpawns() throws {
+        let inspector = FakeInspector(
+            inspection: .found(access(account: "Claude Key", silent: true, securityWrote: false)),
+            quiet: .value(Data("desktop-key".utf8))
         )
+        let runner = RecordingProcess()
+        let ledger = KeychainAccessLedger()
+        let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: ledger)
+
+        XCTAssertEqual(
+            try accessor.readGenericPassword(service: ClaudeDesktopSafeStorageKeyReader.service, account: "Claude Key"),
+            "desktop-key"
+        )
+        XCTAssertTrue(runner.calls.isEmpty)
+        XCTAssertEqual(inspector.quietCount, 1)
+        XCTAssertTrue(ledger.refusedItems(family: "claude").isEmpty)
+    }
+
+    func testOwnerRefusalFillsTheLedger() {
+        let service = CodexAuthStore.keychainService
+        let inspector = FakeInspector(
+            inspection: .found(access(account: "cli|abc", silent: false, securityWrote: false)),
+            quiet: .refused(errSecAuthFailed)
+        )
+        let runner = RecordingProcess()
+        let ledger = KeychainAccessLedger()
+        let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: ledger)
+
+        XCTAssertThrowsError(try accessor.readGenericPassword(service: service, account: "cli|abc")) { error in
+            XCTAssertEqual(error as? KeychainError, .accessNeeded(service: service))
+        }
+        XCTAssertTrue(runner.calls.isEmpty)
+        XCTAssertEqual(ledger.refusedItems(family: "codex"), [KeychainItemRef(service: service, account: "cli|abc")])
+    }
+
+    func testOwnerWriteUpdatesInProcessAndNeverSpawns() throws {
+        let service = CodexAuthStore.keychainService
+        let inspector = FakeInspector(
+            inspection: .found(access(account: "cli|abc", silent: false, securityWrote: false)),
+            update: .updated
+        )
+        let runner = RecordingProcess()
+        let ledger = KeychainAccessLedger()
+        ledger.noteRefused(KeychainItemRef(service: service, account: "cli|abc"))
+        let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: ledger)
+
+        try accessor.writeGenericPassword(service: service, account: "cli|abc", value: "rotated")
+
+        XCTAssertEqual(inspector.updates, [.init(service: service, account: "cli|abc", data: Data("rotated".utf8))])
+        XCTAssertTrue(runner.calls.isEmpty)
+        XCTAssertTrue(ledger.refusedItems(family: "codex").isEmpty)
+    }
+
+    func testRefusedOwnerWriteFillsTheLedger() {
+        let service = CodexAuthStore.keychainService
+        let inspector = FakeInspector(
+            inspection: .found(access(account: "cli|abc", silent: false, securityWrote: false)),
+            update: .refused(errSecAuthFailed)
+        )
+        let runner = RecordingProcess()
+        let ledger = KeychainAccessLedger()
+        let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: ledger)
+
+        XCTAssertThrowsError(try accessor.writeGenericPassword(service: service, account: "cli|abc", value: "rotated")) { error in
+            XCTAssertEqual(error as? KeychainError, .accessNeeded(service: service))
+        }
+        XCTAssertTrue(runner.calls.isEmpty)
+        XCTAssertEqual(ledger.refusedItems(family: "codex"), [KeychainItemRef(service: service, account: "cli|abc")])
+    }
+
+    func testMissingOwnerItemIsNotRecreated() {
+        let inspector = FakeInspector(inspection: .notFound)
+        let runner = RecordingProcess()
+        let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: KeychainAccessLedger())
+
         XCTAssertThrowsError(try accessor.writeGenericPassword(
-            service: "Codex Auth", account: "cli|0123456789abcdef", value: "synthetic-token"
+            service: CodexAuthStore.keychainService, account: "cli|abc", value: "rotated"
         )) { error in
-            guard case KeychainError.writeFailed = error else {
-                return XCTFail("expected KeychainError.writeFailed, got \(error)")
-            }
+            XCTAssertEqual(error as? KeychainError, .writeFailed("not recreating another app's sign-in"))
         }
+        XCTAssertTrue(inspector.updates.isEmpty)
+        XCTAssertTrue(runner.calls.isEmpty)
     }
 
-    func testUnsupportedAccountWriteDoesNotFallBackToServiceOnly() {
-        let keychain = FakeKeychain("original")
-        XCTAssertThrowsError(try keychain.writeGenericPassword(
-            service: "Codex Auth", account: "cli|0123456789abcdef", value: "replacement"
-        ))
-        XCTAssertEqual(keychain.value, "original")
+    func testWriteRefusedWhenLastWriterIsNotSecurity() {
+        let inspector = FakeInspector(inspection: .found(access(account: "rebers", silent: true, securityWrote: false)))
+        let runner = RecordingProcess()
+        let ledger = KeychainAccessLedger()
+        let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: ledger)
+
+        XCTAssertThrowsError(try accessor.writeGenericPassword(service: cursor, value: "rotated")) { error in
+            XCTAssertEqual(error as? KeychainError, .accessNeeded(service: cursor))
+        }
+        XCTAssertTrue(runner.calls.isEmpty)
+        XCTAssertEqual(ledger.refusedItems(family: "cursor").map(\.account), ["rebers"])
     }
 
-    func testWriteAddsOnlyWhenNoExistingItemMatches() throws {
-        let itemAccessor = StubItemAccessor(updateStatus: errSecItemNotFound)
-        let accessor = SecurityKeychainAccessor(itemAccessor: itemAccessor)
+    func testMissingForeignItemIsNotRecreated() {
+        let inspector = FakeInspector(inspection: .notFound)
+        let runner = RecordingProcess()
+        let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: KeychainAccessLedger())
 
-        try accessor.writeGenericPassword(
-            service: "Codex Auth",
-            account: "cli|0123456789abcdef",
-            value: "synthetic-token"
+        XCTAssertThrowsError(try accessor.writeGenericPassword(service: cursor, account: "rebers", value: "new")) { error in
+            XCTAssertEqual(error as? KeychainError, .writeFailed("not recreating another app's sign-in"))
+        }
+        XCTAssertTrue(runner.calls.isEmpty)
+    }
+
+    func testMissingOwnItemIsAddedWithoutUpdateFlag() throws {
+        let inspector = FakeInspector(inspection: .notFound)
+        let runner = RecordingProcess(result: ProcessResult(exitCode: 0, stdout: "", stderr: ""))
+        let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: KeychainAccessLedger(), user: "tester")
+
+        try accessor.writeGenericPasswordForCurrentUser(service: own, value: "ab")
+
+        XCTAssertEqual(runner.calls, [
+            .init(
+                executable: "/usr/bin/security",
+                arguments: ["add-generic-password", "-s", own, "-a", "tester", "-X", "6162"],
+                timeout: 10
+            )
+        ])
+    }
+
+    func testSecurityWriteUsesUpdateFlagAndFoundAccount() throws {
+        let inspector = FakeInspector(inspection: .found(access(account: "rebers", silent: true, securityWrote: true)))
+        let runner = RecordingProcess(result: ProcessResult(exitCode: 0, stdout: "", stderr: ""))
+        let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: KeychainAccessLedger())
+
+        try accessor.writeGenericPassword(service: cursor, value: "ab")
+
+        XCTAssertEqual(runner.calls.map(\.arguments), [
+            ["add-generic-password", "-U", "-s", cursor, "-a", "rebers", "-X", "6162"]
+        ])
+    }
+
+    func testExistsThroughTheProtocolIsMetadataOnly() {
+        let inspector = FakeInspector(
+            inspection: .found(access(account: "rebers", silent: false, securityWrote: false)),
+            quiet: .refused(errSecInteractionNotAllowed)
         )
+        let runner = RecordingProcess()
+        let ledger = KeychainAccessLedger()
+        let keychain: any KeychainAccessing = makeAccessor(inspector: inspector, runner: runner, ledger: ledger)
 
-        XCTAssertEqual(itemAccessor.requests.map(\.operation), [.update, .add])
+        XCTAssertEqual(keychain.genericPasswordExists(service: CodexAuthStore.keychainService), true)
+        XCTAssertEqual(inspector.quietCount, 0)
+        XCTAssertTrue(runner.calls.isEmpty)
+        XCTAssertTrue(ledger.refusedItems(family: "codex").isEmpty)
     }
 
-    func testServiceOnlyWriteUpdatesTheFirstMatchingAccount() throws {
-        let itemAccessor = StubItemAccessor(lookupAccount: "legacy")
-        let accessor = SecurityKeychainAccessor(itemAccessor: itemAccessor)
-
-        try accessor.writeGenericPassword(service: "Cursor", value: "synthetic-token")
-
-        XCTAssertEqual(itemAccessor.requests, [
-            .init(operation: .lookup, service: "Cursor", account: nil),
-            .init(operation: .update, service: "Cursor", account: "legacy"),
-        ])
+    private func access(account: String, silent: Bool, securityWrote: Bool) -> KeychainItemAccess {
+        KeychainItemAccess(account: account, securityReadsSilently: silent, lastWriterIsSecurityTool: securityWrote)
     }
 
-    func testServiceOnlyWriteAddsWithoutAccountWhenNoItemMatches() throws {
-        let itemAccessor = StubItemAccessor(lookupStatus: errSecItemNotFound)
-        let accessor = SecurityKeychainAccessor(itemAccessor: itemAccessor)
+    private func makeAccessor(
+        inspector: FakeInspector,
+        runner: RecordingProcess,
+        ledger: KeychainAccessLedger,
+        user: String = "rebers"
+    ) -> SecurityKeychainAccessor {
+        SecurityKeychainAccessor(inspector: inspector, processRunner: runner, ledger: ledger, currentUser: { user })
+    }
+}
 
-        try accessor.writeGenericPassword(service: "Cursor", value: "synthetic-token")
-
-        XCTAssertEqual(itemAccessor.requests, [
-            .init(operation: .lookup, service: "Cursor", account: nil),
-            .init(operation: .add, service: "Cursor", account: nil),
-        ])
+final class FakeInspector: KeychainItemInspecting, @unchecked Sendable {
+    struct Update: Equatable {
+        var service: String
+        var account: String
+        var data: Data
     }
 
-    func testServiceOnlyWriteLookupFailurePropagatesWithoutUpdatingOrAdding() {
-        let itemAccessor = StubItemAccessor(lookupStatus: errSecInteractionNotAllowed)
-        let accessor = SecurityKeychainAccessor(itemAccessor: itemAccessor)
+    var inspection: KeychainInspection
+    var quiet: KeychainQuietRead
+    var update: KeychainQuietUpdate
+    private(set) var inspectCount = 0
+    private(set) var quietCount = 0
+    private(set) var updates: [Update] = []
 
-        XCTAssertThrowsError(try accessor.writeGenericPassword(service: "Cursor", value: "synthetic-token")) { error in
-            guard case KeychainError.writeFailed = error else {
-                return XCTFail("expected KeychainError.writeFailed, got \(error)")
-            }
-        }
-        XCTAssertEqual(itemAccessor.requests, [
-            .init(operation: .lookup, service: "Cursor", account: nil),
-        ])
+    init(inspection: KeychainInspection, quiet: KeychainQuietRead = .notFound, update: KeychainQuietUpdate = .notFound) {
+        self.inspection = inspection
+        self.quiet = quiet
+        self.update = update
     }
 
-    func testDifferentServiceReadDoesNotWaitForBlockedRead() {
-        let slowReadStarted = DispatchSemaphore(value: 0)
-        let releaseSlowRead = DispatchSemaphore(value: 0)
-        let itemAccessor = BlockingItemAccessor(
-            slowReadStarted: slowReadStarted,
-            releaseSlowRead: releaseSlowRead
-        )
-        let accessor = SecurityKeychainAccessor(itemAccessor: itemAccessor)
-        let readsFinished = DispatchGroup()
-        let slowReadFinished = expectation(description: "Slow read finishes")
-        let fastReadFinished = expectation(description: "Fast read finishes")
-
-        readsFinished.enter()
-        DispatchQueue.global().async {
-            defer {
-                readsFinished.leave()
-                slowReadFinished.fulfill()
-            }
-            _ = try? accessor.readGenericPassword(service: "Slow")
-        }
-
-        guard slowReadStarted.wait(timeout: .now() + 1) == .success else {
-            releaseSlowRead.signal()
-            XCTFail("Slow read did not reach the blocking stub")
-            wait(for: [slowReadFinished], timeout: 1)
-            XCTAssertEqual(readsFinished.wait(timeout: .now() + 1), .success)
-            return
-        }
-
-        readsFinished.enter()
-        DispatchQueue.global().async {
-            defer {
-                readsFinished.leave()
-                fastReadFinished.fulfill()
-            }
-            _ = try? accessor.readGenericPassword(service: "Fast")
-        }
-
-        let fastReadFinishedBeforeRelease = XCTWaiter.wait(for: [fastReadFinished], timeout: 0.5) == .completed
-        releaseSlowRead.signal()
-        wait(for: [slowReadFinished], timeout: 1)
-        XCTAssertEqual(readsFinished.wait(timeout: .now() + 1), .success, "Both reads should finish")
-        XCTAssertTrue(fastReadFinishedBeforeRelease, "Fast read should not wait for the Slow service lock")
+    func inspect(service: String, account: KeychainAccountSelector) -> KeychainInspection {
+        inspectCount += 1
+        return inspection
     }
 
-    private final class StubItemAccessor: SecurityItemAccessing, @unchecked Sendable {
-        enum Operation: Equatable {
-            case read
-            case lookup
-            case update
-            case add
-        }
-
-        struct Request: Equatable {
-            let operation: Operation
-            let service: String
-            let account: String?
-        }
-
-        let readStatus: OSStatus
-        let data: Data?
-        let lookupStatus: OSStatus
-        let lookupAccount: String?
-        let updateStatus: OSStatus
-        let addStatus: OSStatus
-        var requests: [Request] = []
-
-        init(
-            readStatus: OSStatus = errSecSuccess,
-            data: Data? = Data("synthetic-token".utf8),
-            lookupStatus: OSStatus = errSecSuccess,
-            lookupAccount: String? = "synthetic-account",
-            updateStatus: OSStatus = errSecSuccess,
-            addStatus: OSStatus = errSecSuccess
-        ) {
-            self.readStatus = readStatus
-            self.data = data
-            self.lookupStatus = lookupStatus
-            self.lookupAccount = lookupAccount
-            self.updateStatus = updateStatus
-            self.addStatus = addStatus
-        }
-
-        func readGenericPasswordData(service: String, account: String?) -> (status: OSStatus, data: Data?) {
-            requests.append(.init(operation: .read, service: service, account: account))
-            return (readStatus, data)
-        }
-
-        func firstGenericPasswordAccount(service: String) -> (status: OSStatus, account: String?) {
-            requests.append(.init(operation: .lookup, service: service, account: nil))
-            return (lookupStatus, lookupAccount)
-        }
-
-        func updateGenericPasswordData(service: String, account: String?, data: Data) -> OSStatus {
-            requests.append(.init(operation: .update, service: service, account: account))
-            return updateStatus
-        }
-
-        func addGenericPasswordData(service: String, account: String?, data: Data) -> OSStatus {
-            requests.append(.init(operation: .add, service: service, account: account))
-            return addStatus
-        }
+    func readQuietly(service: String, account: KeychainAccountSelector) -> KeychainQuietRead {
+        quietCount += 1
+        return quiet
     }
 
-    private final class BlockingItemAccessor: SecurityItemAccessing, @unchecked Sendable {
-        let slowReadStarted: DispatchSemaphore
-        let releaseSlowRead: DispatchSemaphore
+    func updateQuietly(service: String, account: String, data: Data) -> KeychainQuietUpdate {
+        updates.append(.init(service: service, account: account, data: data))
+        return update
+    }
+}
 
-        init(slowReadStarted: DispatchSemaphore, releaseSlowRead: DispatchSemaphore) {
-            self.slowReadStarted = slowReadStarted
-            self.releaseSlowRead = releaseSlowRead
-        }
+final class RecordingProcess: ProcessRunning, @unchecked Sendable {
+    struct Call: Equatable {
+        var executable: String
+        var arguments: [String]
+        var timeout: TimeInterval
+    }
 
-        func readGenericPasswordData(service: String, account: String?) -> (status: OSStatus, data: Data?) {
-            if service == "Slow" {
-                slowReadStarted.signal()
-                releaseSlowRead.wait()
-            }
-            return (errSecItemNotFound, nil)
-        }
+    var calls: [Call] = []
+    var result: ProcessResult
+    var error: Error?
 
-        func firstGenericPasswordAccount(service: String) -> (status: OSStatus, account: String?) {
-            (errSecItemNotFound, nil)
-        }
+    init(result: ProcessResult = ProcessResult(exitCode: 0, stdout: "", stderr: ""), error: Error? = nil) {
+        self.result = result
+        self.error = error
+    }
 
-        func updateGenericPasswordData(service: String, account: String?, data: Data) -> OSStatus {
-            errSecSuccess
-        }
-
-        func addGenericPasswordData(service: String, account: String?, data: Data) -> OSStatus {
-            errSecSuccess
-        }
+    func run(
+        executable: String,
+        arguments: [String],
+        environment: [String: String],
+        timeout: TimeInterval
+    ) throws -> ProcessResult {
+        calls.append(.init(executable: executable, arguments: arguments, timeout: timeout))
+        if let error { throw error }
+        return result
     }
 }

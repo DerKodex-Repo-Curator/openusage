@@ -35,7 +35,7 @@ final class ClaudeDesktopAuthStoreTests: XCTestCase {
             ]
         )
 
-        let result = fixture.store.load(allowInteraction: false)
+        let result = fixture.store.load()
 
         XCTAssertEqual(result.status, .available)
         XCTAssertEqual(result.oauth?.accessToken, "desktop-token")
@@ -82,14 +82,14 @@ final class ClaudeDesktopAuthStoreTests: XCTestCase {
         )
 
         let result = fixture.store.load(
-            allowInteraction: false, organization: otherOrganization, expectedAccountUUID: accountUUID
+organization: otherOrganization, expectedAccountUUID: accountUUID
         )
 
         XCTAssertEqual(result.status, .available)
         XCTAssertEqual(result.organization, otherOrganization)
         XCTAssertEqual(result.oauth?.accessToken, "other-token")
         XCTAssertEqual(fixture.store.load(
-            allowInteraction: false, organization: otherOrganization,
+organization: otherOrganization,
             expectedAccountUUID: "ffffffff-ffff-4fff-8fff-ffffffffffff"
         ).status, .notFound)
     }
@@ -110,7 +110,7 @@ final class ClaudeDesktopAuthStoreTests: XCTestCase {
 
         XCTAssertFalse(loggedOut.hasCredentialMaterial())
         XCTAssertEqual(loggedOut.load(
-            allowInteraction: false, organization: organization, expectedAccountUUID: accountUUID
+organization: organization, expectedAccountUUID: accountUUID
         ).status, .notFound)
         XCTAssertTrue(fixture.keyReader.calls.isEmpty)
     }
@@ -270,21 +270,16 @@ final class ClaudeDesktopAuthStoreTests: XCTestCase {
         XCTAssertEqual(oauth.accessToken, "full-scope-token")
     }
 
-    func testBackgroundReadDoesNotPromptButManualReadCan() throws {
+    func testRefusedDesktopReadStaysQuiet() throws {
         let fixture = try makeFixture(
             activeOrganization: organization,
             v2: [cacheKey(organization: organization): tokenEntry("desktop-token", expiresIn: 3_600)],
             requiresInteraction: true
         )
 
-        XCTAssertEqual(fixture.store.load(allowInteraction: false).status, .permissionRequired)
-        XCTAssertEqual(fixture.keyReader.calls, [false])
-        XCTAssertEqual(fixture.store.load(allowInteraction: true).status, .available)
-        XCTAssertEqual(fixture.keyReader.calls, [false, true])
-
-        // The derived key is cached after approval, so later background refreshes are prompt-free.
-        XCTAssertEqual(fixture.store.load(allowInteraction: false).status, .available)
-        XCTAssertEqual(fixture.keyReader.calls, [false, true])
+        XCTAssertEqual(fixture.store.load().status, .permissionRequired)
+        XCTAssertEqual(fixture.store.load().status, .permissionRequired)
+        XCTAssertEqual(fixture.keyReader.calls, [false, false])
     }
 
     func testExpiredDesktopTokenIsStale() throws {
@@ -293,7 +288,7 @@ final class ClaudeDesktopAuthStoreTests: XCTestCase {
             v2: [cacheKey(organization: organization): tokenEntry("expired", expiresIn: -1)]
         )
 
-        XCTAssertEqual(fixture.store.load(allowInteraction: false).status, .stale)
+        XCTAssertEqual(fixture.store.load().status, .stale)
     }
 
     func testWorkingCLICredentialsSkipDesktopProbe() throws {
@@ -401,9 +396,7 @@ final class ClaudeDesktopAuthStoreTests: XCTestCase {
         }
         let provider = makeProvider(fixture, environment: [:], keychainJSON: nil, httpClient: httpClient)
 
-        let snapshot = await ProviderRefreshContext.$isManual.withValue(true) {
-            await provider.refresh()
-        }
+        let snapshot = await provider.refresh()
 
         XCTAssertEqual(badge(snapshot.lines, "Error"), ClaudeAuthError.desktopTokenExpired.localizedDescription)
         XCTAssertEqual(httpClient.requests.count, 1)
@@ -438,9 +431,7 @@ final class ClaudeDesktopAuthStoreTests: XCTestCase {
             httpClient: httpClient
         )
 
-        let snapshot = await ProviderRefreshContext.$isManual.withValue(true) {
-            await provider.refresh()
-        }
+        let snapshot = await provider.refresh()
 
         XCTAssertNil(badge(snapshot.lines, "Error"))
         let usageRequests = httpClient.requests.filter { $0.isClaudeUsagePoll }
@@ -459,9 +450,7 @@ final class ClaudeDesktopAuthStoreTests: XCTestCase {
         }
         let provider = makeProvider(fixture, keychainJSON: cliCredentials(token: "revoked-cli"), httpClient: httpClient)
 
-        let snapshot = await ProviderRefreshContext.$isManual.withValue(true) {
-            await provider.refresh()
-        }
+        let snapshot = await provider.refresh()
 
         XCTAssertEqual(badge(snapshot.lines, "Error"), ClaudeAuthError.tokenExpired.localizedDescription)
         XCTAssertEqual(httpClient.requests.count, 1)

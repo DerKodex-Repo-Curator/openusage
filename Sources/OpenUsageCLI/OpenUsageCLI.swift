@@ -5,6 +5,7 @@ import OpenUsage
 @main
 struct OpenUsageCLI {
     static func main() async {
+        KeychainUserInteraction.disableForProcess()
         do {
             let arguments = try CLIArguments.parse(Array(CommandLine.arguments.dropFirst()))
             if arguments.showHelp {

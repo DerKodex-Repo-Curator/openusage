@@ -95,7 +95,8 @@ final class AppContainer {
             isProviderEnabled: { [enablement] in enablement.isEnabled($0) },
             orderedDescriptors: { [layout] in layout.visiblePlaced.compactMap { layout.descriptor(for: $0) } },
             notificationSettings: { notificationSettings },
-            providerIdentityKeys: accountAssembly.identityKeysByCard
+            providerIdentityKeys: accountAssembly.identityKeysByCard,
+            keychainAccessRequester: KeychainAccessRequester.live()
         )
         let iCloudSync = ICloudUsageSyncStore(dataStore: dataStore)
         // Re-enabling a provider should fetch it promptly, so clear any leftover failure backoff before

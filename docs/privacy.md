@@ -45,9 +45,10 @@ your macOS account (owner read and write only). Antigravity's short-lived refres
 to the current Keychain login using a one-way fingerprint; the refresh credential itself is not copied.
 The cache is never used after logout, an account change, or while Keychain access is unavailable.
 
-Claude Desktop access is strictly read-only. OpenUsage may ask macOS for permission to use the
-`Claude Safe Storage` Keychain item so it can decrypt Desktop's current access token. It never uses
-Desktop's rotating refresh token and never modifies Desktop's config, cookies, or Keychain data.
+Claude Desktop access is strictly read-only. OpenUsage decrypts Desktop's current access token with the
+`Claude Safe Storage` Keychain item. It never uses Desktop's rotating refresh token and never modifies
+Desktop's config, cookies, or Keychain data. A background refresh does not ask for Keychain access. The
+dialog appears only after you choose Refresh on the card; **Always Allow** is what makes later reads silent.
 
 ## Other network requests
 

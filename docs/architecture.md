@@ -34,8 +34,10 @@ It never launches the GUI or duplicates provider, auth, pricing, or mapping logi
 
 Each provider is a small module that conforms to `ProviderRuntime`. A refresh flows through three parts:
 
-1. **Auth store** — reads credentials that already exist on the machine (config files, keychain). OpenUsage
-   never asks the user to paste tokens.
+1. **Auth store** — reads credentials that already exist on the machine (config files, Keychain). OpenUsage
+   never asks the user to paste tokens. Keychain reads follow the item's writer: `security`-written items
+   go through `security` after a silent-access check, and items an owner app writes itself are read
+   and updated in-process. A background refresh cannot show a Keychain dialog. See [Keychain access](keychain.md).
 2. **Usage client** — makes the HTTP calls to the provider's API.
 3. **Mapper** — turns the provider's response into the app's own vocabulary: a `ProviderSnapshot`
    containing typed widget values (`.progress`, `.values`, `.badge`, `.chart`) plus `.text` notices that
