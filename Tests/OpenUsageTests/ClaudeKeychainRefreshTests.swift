@@ -77,6 +77,35 @@ final class ClaudeKeychainRefreshTests: XCTestCase {
         XCTAssertTrue(keychain.writes[0].contains("rotated-refresh"))
     }
 
+    func testRefusedKeychainLoginWithLocalHistoryAsksForAccess() async throws {
+        let now = Date(timeIntervalSince1970: 1_771_603_200)
+        let home = try ClaudeLogFixture.makeHome(files: [
+            "project/session.jsonl": ClaudeLogFixture.usageLine(timestamp: "2026-02-20T12:00:00Z", input: 100, output: 10)
+        ])
+        defer { try? FileManager.default.removeItem(at: home) }
+        let http = RoutingHTTPClient { _ in
+            XCTFail("no usage request without a readable login")
+            return HTTPResponse(statusCode: 500, headers: [:], body: Data())
+        }
+        let provider = ClaudeProvider(
+            authStore: ClaudeAuthStore(
+                environment: FakeEnvironment([:]),
+                files: FakeFiles(),
+                keychain: RefusingKeychain(),
+                now: { now }
+            ),
+            usageClient: ClaudeUsageClient(httpClient: http),
+            logUsageScanner: ClaudeLogFixture.scanner(home: home),
+            now: { now },
+            pricing: { TestPricing.bundled }
+        )
+
+        let snapshot = await provider.refresh()
+
+        XCTAssertEqual(snapshot.errorCategory, .credentialAccess)
+        XCTAssertTrue(http.requests.isEmpty)
+    }
+
     private func makeProvider(
         keychain: WritableFlagKeychain,
         token: String,
@@ -101,6 +130,16 @@ final class ClaudeKeychainRefreshTests: XCTestCase {
             now: { now },
             pricing: { TestPricing.bundled }
         )
+    }
+}
+
+private struct RefusingKeychain: KeychainAccessing {
+    func readGenericPassword(service: String) throws -> String? {
+        throw KeychainError.accessNeeded(service: service)
+    }
+
+    func writeGenericPassword(service: String, value: String) throws {
+        XCTFail("a refused login is never written")
     }
 }
 

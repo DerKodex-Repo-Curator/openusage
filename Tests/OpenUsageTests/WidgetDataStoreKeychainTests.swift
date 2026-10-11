@@ -58,28 +58,67 @@ final class WidgetDataStoreKeychainTests: XCTestCase {
         XCTAssertEqual(runtime.refreshCount, 1)
     }
 
-    func testSecondCallWhileARequestIsInFlightDoesNotRequestAgain() async {
+    func testSecondClickDuringAGrantDoesNotAskAgain() async {
         let ledger = KeychainAccessLedger()
         ledger.noteRefused(KeychainItemRef(service: "Claude Code-credentials", account: "rebers"))
-        let requester = GateRequester()
+        let requester = GateRequester(ledger: ledger)
         let entered = expectation(description: "grant started")
+        entered.assertForOverFulfill = false
         requester.onEnter = { entered.fulfill() }
         let runtime = CountingProviderRuntime(
             provider: provider,
             descriptors: [],
             snapshot: ProviderSnapshot.make(provider: provider, plan: nil, lines: [], refreshedAt: Date())
         )
-        let store = makeStore(runtime: runtime, requester: requester, ledger: ledger)
+        let store = makeStore(runtimes: [runtime], requester: requester, ledger: ledger)
 
         let first = Task { await store.refreshFromUser(providerID: provider.id) }
         await fulfillment(of: [entered], timeout: 2)
         let second = Task { await store.refreshFromUser(providerID: provider.id) }
-        await second.value
-        XCTAssertEqual(requester.count, 1)
+        await Task.yield()
         requester.release()
         await first.value
+        await second.value
+
         XCTAssertEqual(requester.count, 1)
         XCTAssertEqual(runtime.refreshCount, 1)
+    }
+
+    func testAccountCardsInOneFamilyShareOneGrant() async {
+        let ledger = KeychainAccessLedger()
+        ledger.noteRefused(KeychainItemRef(service: "Claude Code-credentials", account: "rebers"))
+        let requester = GateRequester(ledger: ledger)
+        let entered = expectation(description: "grant started")
+        entered.assertForOverFulfill = false
+        requester.onEnter = { entered.fulfill() }
+        let work = Provider(
+            id: ProviderAccountID.make(family: "claude", identityKey: "work|me@example.com"),
+            displayName: "Claude",
+            icon: .providerMark("claude")
+        )
+        let personalRuntime = CountingProviderRuntime(
+            provider: provider,
+            descriptors: [],
+            snapshot: ProviderSnapshot.make(provider: provider, plan: nil, lines: [], refreshedAt: Date())
+        )
+        let workRuntime = CountingProviderRuntime(
+            provider: work,
+            descriptors: [],
+            snapshot: ProviderSnapshot.make(provider: work, plan: nil, lines: [], refreshedAt: Date())
+        )
+        let store = makeStore(runtimes: [personalRuntime, workRuntime], requester: requester, ledger: ledger)
+
+        let first = Task { await store.refreshFromUser(providerID: provider.id) }
+        await fulfillment(of: [entered], timeout: 2)
+        let second = Task { await store.refreshFromUser(providerID: work.id) }
+        await Task.yield()
+        requester.release()
+        await first.value
+        await second.value
+
+        XCTAssertEqual(requester.count, 1)
+        XCTAssertEqual(personalRuntime.refreshCount, 1)
+        XCTAssertEqual(workRuntime.refreshCount, 1)
     }
 
     func testNoticeAppearsOnlyForListedCategoriesWithRefusedItems() async {
@@ -119,13 +158,21 @@ final class WidgetDataStoreKeychainTests: XCTestCase {
         requester: (any KeychainAccessRequesting)?,
         ledger: KeychainAccessLedger
     ) -> WidgetDataStore {
+        makeStore(runtimes: [runtime], requester: requester, ledger: ledger)
+    }
+
+    private func makeStore(
+        runtimes: [ProviderRuntime],
+        requester: (any KeychainAccessRequesting)?,
+        ledger: KeychainAccessLedger
+    ) -> WidgetDataStore {
         let suite = "OpenUsageTests.KeychainStore.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
-        let registry = WidgetRegistry(providers: [runtime.provider], descriptors: [])
+        let registry = WidgetRegistry(providers: runtimes.map(\.provider), descriptors: [])
         return WidgetDataStore(
             registry: registry,
-            providers: [runtime],
+            providers: runtimes,
             defaults: defaults,
             keychainAccessRequester: requester,
             keychainLedger: ledger
@@ -143,21 +190,25 @@ private final class RecordingRequester: KeychainAccessRequesting, @unchecked Sen
 }
 
 private final class GateRequester: KeychainAccessRequesting, @unchecked Sendable {
+    let ledger: KeychainAccessLedger
     var onEnter: () -> Void = {}
     private(set) var count = 0
-    private var hold: CheckedContinuation<Void, Never>?
+    private var holds: [CheckedContinuation<Void, Never>] = []
+
+    init(ledger: KeychainAccessLedger) { self.ledger = ledger }
 
     func request(_ item: KeychainItemRef) async -> KeychainGrant {
         count += 1
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            hold = cont
+            holds.append(cont)
             onEnter()
         }
+        ledger.noteReadable(item)
         return .granted
     }
 
     func release() {
-        hold?.resume()
-        hold = nil
+        holds.forEach { $0.resume() }
+        holds = []
     }
 }

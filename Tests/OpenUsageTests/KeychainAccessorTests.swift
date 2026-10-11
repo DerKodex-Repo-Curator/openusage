@@ -135,17 +135,17 @@ final class KeychainAccessorTests: XCTestCase {
         XCTAssertTrue(runner.calls.isEmpty)
     }
 
-    func testWriteRefusedWhenLastWriterIsNotSecurity() {
+    func testWriteBlockedByAnotherLastWriterDoesNotAskForAccess() {
         let inspector = FakeInspector(inspection: .found(access(account: "rebers", silent: true, securityWrote: false)))
         let runner = RecordingProcess()
         let ledger = KeychainAccessLedger()
         let accessor = makeAccessor(inspector: inspector, runner: runner, ledger: ledger)
 
         XCTAssertThrowsError(try accessor.writeGenericPassword(service: cursor, value: "rotated")) { error in
-            XCTAssertEqual(error as? KeychainError, .accessNeeded(service: cursor))
+            guard case .writeFailed = error as? KeychainError else { return XCTFail("unexpected \(error)") }
         }
         XCTAssertTrue(runner.calls.isEmpty)
-        XCTAssertEqual(ledger.refusedItems(family: "cursor").map(\.account), ["rebers"])
+        XCTAssertTrue(ledger.refusedItems(family: "cursor").isEmpty)
     }
 
     func testMissingForeignItemIsNotRecreated() {

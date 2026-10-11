@@ -4,31 +4,35 @@ import XCTest
 @MainActor
 final class CodexKeychainCardTests: XCTestCase {
     func testRefusedCodexAuthReadKeepsTheExistingAccountCard() async throws {
-        let identity = try XCTUnwrap(CodexAccountIdentity(accountID: "workspace-a", email: "personal@example.com"))
-        let defaults = try makeDefaults()
-        let accounts = ProviderAccountsStore(defaults: defaults)
-        accounts.reconcile(with: [.init(
-            family: "codex",
-            identityKey: identity.key,
-            label: identity.email,
-            sources: [.init(kind: .defaultHome, anchor: nil, holdsDefaultSource: true)]
-        )])
-        let keychain = RefusingCodexKeychain()
+        let identities = try [
+            XCTUnwrap(CodexAccountIdentity(accountID: "workspace-a", email: "personal@example.com")),
+            XCTUnwrap(CodexAccountIdentity(accountID: nil, email: "personal@example.com")),
+            XCTUnwrap(CodexAccountIdentity(accountID: "workspace-a", email: nil)),
+        ]
         defer { KeychainAccessLedger.shared.noteMissing(service: CodexAuthStore.keychainService, account: nil) }
-        let home = URL(fileURLWithPath: "/openusage-codex-card-fixture")
-        let discovery = await ProviderAccountAssembly.makeCodexCards(
-            observer: DefaultAccountObserver(
-                environment: FakeEnvironment([:]),
-                files: FakeFiles(),
-                keychain: keychain,
-                homeDirectory: { home }
-            ),
-            accountsStore: accounts,
-            listDirectories: { _ in [] }
-        )
+        for identity in identities {
+            let accounts = ProviderAccountsStore(defaults: try makeDefaults())
+            accounts.reconcile(with: [.init(
+                family: "codex",
+                identityKey: identity.key,
+                label: identity.email,
+                sources: [.init(kind: .defaultHome, anchor: nil, holdsDefaultSource: true)]
+            )])
+            let home = URL(fileURLWithPath: "/openusage-codex-card-fixture")
+            let discovery = await ProviderAccountAssembly.makeCodexCards(
+                observer: DefaultAccountObserver(
+                    environment: FakeEnvironment([:]),
+                    files: FakeFiles(),
+                    keychain: RefusingCodexKeychain(),
+                    homeDirectory: { home }
+                ),
+                accountsStore: accounts,
+                listDirectories: { _ in [] }
+            )
 
-        XCTAssertEqual(discovery.cards.map(\.identity), [identity])
-        XCTAssertEqual(accounts.records.map(\.identityKey), [identity.key])
+            XCTAssertEqual(discovery.cards.map(\.identity), [identity], identity.key)
+            XCTAssertEqual(accounts.records.map(\.identityKey), [identity.key], identity.key)
+        }
     }
 
     func testMissingCodexAuthReadDoesNotInventACard() async throws {
